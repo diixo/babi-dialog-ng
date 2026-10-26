@@ -47,24 +47,56 @@ def make_dialogue(rng, task, action):
 def render(rng, task, action):
     verb, _, ask, _ = action
     turns = make_dialogue(rng, task, action)
+    rows = []
+
+    def fact(line):
+        rows.append(line)
+        return len(rows)
+
+    def question(label, answer, refs):
+        refs = sorted(set(refs))
+        assert refs and all(1 <= i < len(rows) + 1 for i in refs)
+        return fact(f'{label}\t{answer}\t{" ".join(map(str, refs))}')
+
+    for turn_index, (role, utterance, observed) in enumerate(turns):
+        utterance_line = fact(f'{role}: {utterance}')
+        if role == 'Assistant':
+            last_assistant_line = utterance_line
+            continue
+    return '\n'.join(f'{i} {line}' for i, line in enumerate(rows, 1)) + '\n\n'
 
 
 def build(out, counts):
     from actions import ACTIONS
+    out.mkdir(parents=True, exist_ok=True)
 
     # Reserve evaluation inputs first: changing only --train keeps valid/test fixed.
-    for split in ('valid', 'test', 'train'):
+    for split, n in counts.items():
         if split not in counts:
             continue
         rng = random.Random(SEED)
-        
-        for i in range(counts[split]):
+        stories = []
+        for i in range(n):
             task = TASKS[i % len(TASKS)]
             
             for action in ACTIONS:
 
                 story = render(rng, task, action)
-
+                stories.append(story)
+        rng.shuffle(stories)
+        for story in stories:
+            rows = story.strip().splitlines()
+            assert rows[0].startswith('1 User:')
+            for j, row in enumerate(rows, 1):
+                assert row.startswith(f'{j} '), row
+                body = row[len(str(j)) + 1:]
+                if '\t' in body:
+                    parts = body.split('\t')
+                    assert len(parts) == 3 and parts[1]
+                    assert all(1 <= int(k) < j for k in parts[2].split())
+        path = out / f'{split}.txt'
+        path.write_text(''.join(stories), encoding='utf-8')
+        print(f'{path}: {n} stories')
 
 
 if __name__ == '__main__':
